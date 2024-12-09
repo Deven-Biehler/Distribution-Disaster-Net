@@ -113,7 +113,6 @@ def get_next_node(G, left_node, current_string):
         print("error")
     return next_node
 
-
 def combine_edges(G, edge1, edge2):
     # Check if the edges share a node
     weight = get_edge_weight(G, edge1) + get_edge_weight(G, edge2)

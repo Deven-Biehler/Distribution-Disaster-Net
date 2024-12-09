@@ -5,42 +5,26 @@ import pandas as pd
 import math
 import numpy as np
 
-# Step 1: Load the shapefile
-shapefile_path = 'Data\Ashville Road Shp files\Buncombe_Couny_Centerline_Data.shp'
-gdf = gpd.read_file(shapefile_path)
-
-risk_path = 'Data/Ashville Road Shp files/risk_zone/risk_zone.shp'
-risk = gpd.read_file(risk_path)
-
-# print size of both
-print("Shapefile size: ", gdf.shape)
-print("Risk size: ", risk.shape)
 
 
-# Step 2: Inspect the first few rows of the shapefile (including vector data)
-# print(gdf.head())
 
-# Step 3: Extract the geometry column (which holds the vector data)
-geometry = gdf['geometry']
-centerline = gdf['CENTERLINE']
-
-# Create a bounding box for the entire dataset
-minx, miny, maxx, maxy = gdf.total_bounds
-rangex = maxx - minx
-rangey = maxy - miny
-
-marginx = rangex * 0
-marginy = rangey * 0
-
-new_minx = minx + marginx
-new_miny = miny + marginy
-new_maxx = maxx - marginx
-new_maxy = maxy - marginy
-
-PROPERTIES = ['SPEED_LIMI', 'STREET_TYP', 'FULL_STREE', 'OneWay', 'ROAD_CLASS']
-types = [float, str, str, float, int]
 
 def create_graph(gdf, risk):
+    # Create a bounding box for the entire dataset
+    minx, miny, maxx, maxy = gdf.total_bounds
+    rangex = maxx - minx
+    rangey = maxy - miny
+
+    marginx = rangex * 0
+    marginy = rangey * 0
+
+    new_minx = minx + marginx
+    new_miny = miny + marginy
+    new_maxx = maxx - marginx
+    new_maxy = maxy - marginy
+
+    PROPERTIES = ['SPEED_LIMI', 'STREET_TYP', 'FULL_STREE', 'OneWay', 'ROAD_CLASS']
+    types = [float, str, str, float, int]
     G = nx.Graph()
     risk_coords = set()
     for i, row in risk.iterrows():
@@ -91,7 +75,8 @@ def create_graph(gdf, risk):
         G.add_edge(geom.coords[0], 
                     geom.coords[-1], 
                     weight=weight,
-                    risk=risk)
+                    risk=risk,
+                    pop=row['POP20'])
         
 
     print("total nodes: ", len(G.nodes))
@@ -117,20 +102,22 @@ def combine_edges(G, edge1, edge2):
     # Check if the edges share a node
     weight = get_edge_weight(G, edge1) + get_edge_weight(G, edge2)
     risk = G[edge1[0]][edge1[1]]['risk'] or G[edge2[0]][edge2[1]]['risk']
+    pop = G[edge1[0]][edge1[1]]['pop'] + G[edge2[0]][edge2[1]]['pop']
     if edge1[0] == edge2[0]:
-        return (edge1[1], edge2[1], weight, risk)
+        return (edge1[1], edge2[1], weight, risk, pop)
     if edge1[0] == edge2[1]:
-        return (edge1[1], edge2[0], weight, risk)
+        return (edge1[1], edge2[0], weight, risk, pop)
     if edge1[1] == edge2[0]:
-        return (edge1[0], edge2[1], weight, risk)
+        return (edge1[0], edge2[1], weight, risk, pop)
     if edge1[1] == edge2[1]:
-        return (edge1[0], edge2[0], weight, risk)
+        return (edge1[0], edge2[0], weight, risk, pop)
     return None
 
 def remove_connector_nodes(G):
     nodes_to_remove = set()
     edges_to_add = set()
     nodes_processed = set()
+    columns_to_accumulate = ['weight', 'risk', 'pop']
     
     for i, node in enumerate(G.nodes):
         # If the node has only two neighbors, it is a connector node and should be removed
@@ -138,7 +125,8 @@ def remove_connector_nodes(G):
         if len(neighbors) == 2 and node not in nodes_to_remove and node not in nodes_processed:
             weight = G[node][neighbors[0]]['weight'] + G[node][neighbors[1]]['weight']
             risk = G[node][neighbors[0]]['risk'] or G[node][neighbors[1]]['risk']
-            new_edge = (neighbors[0], neighbors[1], weight, risk)
+            pop = G[node][neighbors[0]]['pop'] + G[node][neighbors[1]]['pop']
+            new_edge = (neighbors[0], neighbors[1], weight, risk, pop)
 
             # Find two intersection nodes
             current_string = set([node])
@@ -151,6 +139,8 @@ def remove_connector_nodes(G):
                 weight += G[left_node][next_node]['weight']
                 # Update the risk
                 risk = risk or G[left_node][next_node]['risk']
+                # Update the population
+                pop += G[left_node][next_node]['pop']
                 current_string.add(left_node)
                 left_node = next_node
 
@@ -164,6 +154,8 @@ def remove_connector_nodes(G):
                 weight += G[right_node][next_node]['weight']
                 # Update the risk
                 risk = risk or G[right_node][next_node]['risk']
+                # Update the population
+                pop += G[right_node][next_node]['pop']
                 current_string.add(right_node)
                 right_node = next_node
 
@@ -172,7 +164,7 @@ def remove_connector_nodes(G):
             if 3 in degrees or 1 in degrees:
                 print("error")
 
-            new_edge = (left_node, right_node, weight, risk)
+            new_edge = (left_node, right_node, weight, risk, pop)
             nodes_to_remove.update(current_string)
             current_string.update([left_node, right_node])
             nodes_processed.update(current_string)
@@ -190,13 +182,7 @@ def remove_connector_nodes(G):
             print("skipping edge")
             continue
 
-        G.add_edge(edge[0], edge[1], weight=edge[2], risk=edge[3])
+        G.add_edge(edge[0], edge[1], weight=edge[2], risk=edge[3], pop=edge[4])
 
     return G
 
-# Example usage
-G = create_graph(gdf, risk)
-G = remove_connector_nodes(G)
-
-# save the graph to a gml file
-nx.write_gml(G, 'Data\Buncombe_Couny_Centerline_Data.gml')
