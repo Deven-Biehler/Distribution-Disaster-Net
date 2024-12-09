@@ -2,10 +2,8 @@ import os
 import geopandas as gpd
 
 # Load the shapefile
-x1 = 1
-x2 = 2
+shapefile_path = 'Data/Ashville Road Shp files/Buncombe_Couny_Centerline_Data.shp'
+gdf = gpd.read_file(shapefile_path)
 
-properties = []
-
-properties.extend(x1)
-print(properties)
+# Print the first few rows of the GeoDataFrame
+print(list(gdf.columns))

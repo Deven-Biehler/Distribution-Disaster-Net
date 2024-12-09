@@ -14,12 +14,12 @@ def pipeline():
     add_population_density()
 
     # Load the shapefile
-    shapefile_path = 'Data/population_mapping.shp'
+    shapefile_path = 'Data/temp/population_mapping.shp'
 
 
     gdf = gpd.read_file(shapefile_path)
 
-    risk_path = 'Data/Ashville Road Shp files/risk_zone/risk_zone.shp'
+    risk_path = 'Data/Ashville_Floods/risk_zone.shp'
     risk = gpd.read_file(risk_path)
 
     # print size of both
@@ -32,35 +32,35 @@ def pipeline():
     G = remove_connector_nodes(G)
 
     # save the graph to a gml file
-    nx.write_gml(G, 'Data\Buncombe_Couny_Centerline_Data.gml')
+    nx.write_gml(G, 'Data/Ashville_Roads/Buncombe_Couny_Centerline_Data.shp')
 
 
 
     # Add safe zones
     # Read shapefile
-    gdf = gpd.read_file("Data\Ashville Road Shp files\evac\\flood_evac.shp")
+    gdf = gpd.read_file("Data/Ashville_Safe/flood_evac.shp")
     # read coordinates of points from shapefile
     points = gdf['geometry']
 
-    network_path = "Data\Buncombe_Couny_Centerline_Data.gml"
+    network_path = "Graph_data/Buncombe_Couny_Centerline_Data.gml"
     G = nx.read_gml(network_path)
     G = add_safe_zones(G, points)
 
     # Save the graph
-    nx.write_gml(G, "Data\Buncombe_Couny_Centerline_Data_w_safezone.gml")
+    nx.write_gml(G, "Graph_data/Buncombe_Couny_Centerline_Data_w_safezone.gml")
 
 
 
 
     # Filter out danger zones
     # read the graph
-    G = nx.read_gml("Data\Buncombe_Couny_Centerline_Data_w_safezone.gml")
+    G = nx.read_gml("Graph_data/Buncombe_Couny_Centerline_Data_w_safezone.gml")
     G = filter_danger_zone(G, 1)
     # save the graph
-    nx.write_gml(G, "Data\Buncombe_Couny_Centerline_Data_w_safezone_filtered.gml")
+    nx.write_gml(G, "Graph_data/Buncombe_Couny_Centerline_Data_w_safezone_filtered.gml")
 
 
-    
+
 
     # # Pick a random start node
     # import random
@@ -85,10 +85,10 @@ def pipeline():
 
 
     # Generate shape file
-    graph_path = "Data\Buncombe_Couny_Centerline_Data_w_safezone_filtered.gml"
+    graph_path = "Graph_data/Buncombe_Couny_Centerline_Data_w_safezone_filtered.gml"
     graph = nx.read_gml(graph_path)
-    generate_shape_file_from_gml([graph], "Data\Buncombe_County_Centerline_Data.shp")
-    generate_shape_file_from_json("Data\quickest_route.json", "Data\quickest_route.shp")
+    generate_shape_file_from_gml([graph], "Data/Ashville_Roads/Buncombe_County_Centerline_Data.shp")
+    generate_shape_file_from_json("Data/Ashville_Routes/quickest_route.json", "Data/Ashville_Routes/quickest_route.shp")
 
 
 

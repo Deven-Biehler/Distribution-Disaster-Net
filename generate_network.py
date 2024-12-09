@@ -40,7 +40,22 @@ def create_graph(gdf, risk):
     # new_maxx = maxx - marginx
     # new_maxy = maxy - marginy
 
-    PROPERTIES = list(gdf.columns)
+    PROPERTIES = ['OBJECTID', 'CENTERLINE', 'ROAD_CLASS', 'STREET_PRE', 'STREET_NAM', 
+                  'STREET_TYP', 'STREET_POS', 'STREET_DUP', 'FULL_STREE', 'SPEED_LIMI', 
+                  'LANE_COUNT', 'LEFT_FROM_', 'LEFT_TO_AD', 'RIGHT_FROM', 'RIGHT_TO_A', 
+                  'USER_ID', 'CREATE_DAT', 'CHANGE_DAT', 'LESN', 'RESN', 'LZIP', 'RZIP', 
+                  'LCOMMCODE', 'RCOMMCODE', 'ROUTE_ID', 'OneWay', 'FromElevat', 'ToElevatio', 
+                  'GlobalID', 'last_edite', 'IntervalDi', 'created_us', 'created_da', 
+                  'last_edi_1', 'Shape__Len', 'geometry']
+    
+    PROPERTIES.remove('STREET_PRE')
+    PROPERTIES.remove('created_us')
+    PROPERTIES.remove('created_da')
+    PROPERTIES.remove('last_edi_1')
+    PROPERTIES.remove('STREET_POS')
+    PROPERTIES.remove('CREATE_DAT')
+    PROPERTIES.remove('CHANGE_DAT')
+
     G = nx.Graph()
     risk_coords = get_risk_coords(risk)
     
@@ -49,10 +64,6 @@ def create_graph(gdf, risk):
         for property in PROPERTIES:
             if property not in row:
                 print(f"Error: {property} not found in row")
-                error = True
-                break
-            if row[property] is None:
-                print(f"Error: {property} is None")
                 error = True
                 break
         if error:
@@ -67,7 +78,7 @@ def create_graph(gdf, risk):
 
 
         if geom.geom_type != 'LineString':
-            print(f"Skipping geometry of type {geom.geom_type}")
+            # print(f"Skipping geometry of type {geom.geom_type}")
             continue
 
         risk = 0
@@ -81,7 +92,9 @@ def create_graph(gdf, risk):
         }
 
         for property in PROPERTIES:
-            edge_attributes[property] = row[property]
+            # Check if the property is a number
+            if isinstance(row[property], (int, float)):
+                edge_attributes[property] = row[property]
         
         G.add_edge(geom.coords[0], 
                     geom.coords[-1],
@@ -107,25 +120,28 @@ def get_next_node(G, left_node, current_string):
         print("error")
     return next_node
 
-def accumulate_proerties(edge1, edge2):
+def accumulate_proerties(properties1, properties2):
     properties = {}
-    for property in edge1:
+    for key in properties1.keys():
         # Check if the property is a number
-        if isinstance(edge1[property], (int, float)):
-            properties[property] = edge1[property] + edge2[property]
+        if isinstance(properties1[key], (int, float)) and isinstance(properties2[key], (int, float)):
+            properties[key] = properties1[key] + properties2[key]
         
         # accumulate all of the object ids for late use
         if property == 'OBJECTID':
             properties[property] = []
-            if isinstance(edge1[property], list):
-                properties[property].extend(edge1[property])
+            if isinstance(properties1[key], list):
+                properties[key].extend(properties1[key])
             else:
-                properties[property].append(edge1[property])
-            if isinstance(edge2[property], list):
-                properties[property].extend(edge2[property])
+                properties[key].append(properties1[key])
+
+            if isinstance(properties2[key], list):
+                properties[key].extend(properties2[key])
             else:
-                properties[property].append(edge2[property])
+                properties[key].append(properties2[key])
     return properties
+
+
 
 
 def combine_edges(edge1, edge2):
@@ -145,7 +161,7 @@ def combine_edges(edge1, edge2):
 # Simplifies the network by removing connector nodes and accumulating their properties
 def remove_connector_nodes(G):
     nodes_to_remove = set()
-    edges_to_add = set()
+    edges_to_add = []
     nodes_processed = set()
     
     for i, node in enumerate(G.nodes):
@@ -162,8 +178,7 @@ def remove_connector_nodes(G):
                 # Find the neighbor that is not the current string
                 next_node = get_next_node(G, left_node, current_string)
                 # Update Properties
-                for property in new_properties.keys():
-                    new_properties[property] += G[left_node][next_node][property]
+                new_properties = accumulate_proerties(new_properties, G[left_node][next_node])
 
                 current_string.add(left_node)
                 left_node = next_node
@@ -175,8 +190,7 @@ def remove_connector_nodes(G):
                 # Find the neighbor that is not the current string
                 next_node = get_next_node(G, right_node, current_string)
                 # Update Properties
-                for property in new_properties.keys():
-                    new_properties[property] += G[right_node][next_node][property]
+                new_properties = accumulate_proerties(new_properties, G[right_node][next_node])
 
                 current_string.add(right_node)
                 right_node = next_node
@@ -189,7 +203,7 @@ def remove_connector_nodes(G):
             nodes_to_remove.update(current_string)
             current_string.update([left_node, right_node])
             nodes_processed.update(current_string)
-            edges_to_add.add((left_node, right_node, new_properties))
+            edges_to_add.append((left_node, right_node, new_properties))
 
 
     print(f"Processed {len(nodes_processed)} nodes")
