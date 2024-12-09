@@ -1,7 +1,7 @@
 from add_safe_zones import add_safe_zones
 from generate_network import create_graph, remove_connector_nodes
 from generate_shape_file import generate_shape_file_from_gml, generate_shape_file_from_json
-from filter_danger_zone import filter_danger_zone
+from filter_graph import filter_danger_zone
 from get_quickest_route import quickest_route
 from add_population import add_population_density
 import networkx as nx

@@ -7,25 +7,15 @@ import numpy as np
 
 
 
+def create_edge(node1, node2, properties):
+    edge = {
+        "node1": node1,
+        "node2": node2,
+        "properties": properties
+    }
+    return edge
 
-
-def create_graph(gdf, risk):
-    # Create a bounding box for the entire dataset
-    minx, miny, maxx, maxy = gdf.total_bounds
-    rangex = maxx - minx
-    rangey = maxy - miny
-
-    marginx = rangex * 0
-    marginy = rangey * 0
-
-    new_minx = minx + marginx
-    new_miny = miny + marginy
-    new_maxx = maxx - marginx
-    new_maxy = maxy - marginy
-
-    PROPERTIES = ['SPEED_LIMI', 'STREET_TYP', 'FULL_STREE', 'OneWay', 'ROAD_CLASS']
-    types = [float, str, str, float, int]
-    G = nx.Graph()
+def get_risk_coords(risk):
     risk_coords = set()
     for i, row in risk.iterrows():
         geom = row['geometry']
@@ -34,6 +24,25 @@ def create_graph(gdf, risk):
             continue
         for coords in geom.coords:
             risk_coords.add(coords)
+    return risk_coords
+
+def create_graph(gdf, risk):
+    # Create a bounding box for the entire dataset
+    # minx, miny, maxx, maxy = gdf.total_bounds
+    # rangex = maxx - minx
+    # rangey = maxy - miny
+
+    # marginx = rangex * 0
+    # marginy = rangey * 0
+
+    # new_minx = minx + marginx
+    # new_miny = miny + marginy
+    # new_maxx = maxx - marginx
+    # new_maxy = maxy - marginy
+
+    PROPERTIES = list(gdf.columns)
+    G = nx.Graph()
+    risk_coords = get_risk_coords(risk)
     
     for i, row in gdf.iterrows():
         error = False
@@ -43,11 +52,7 @@ def create_graph(gdf, risk):
                 error = True
                 break
             if row[property] is None:
-                # print(f"Error: {property} is None")
-                error = True
-                break
-            if type(row[property]) != types[PROPERTIES.index(property)]:
-                print(f"Error: {property} has type {type(row[property])} instead of {types[PROPERTIES.index(property)]}")
+                print(f"Error: {property} is None")
                 error = True
                 break
         if error:
@@ -55,28 +60,32 @@ def create_graph(gdf, risk):
 
 
         geom = row['geometry']
-        weight = geom.length
 
+        # Filter out centerlines that are not roads
         if row["STREET_TYP"] == 'RIV' or row["STREET_TYP"] == 'TRL':
             continue
-        # filter out centerlines that are outside the bounding box
-        if geom.bounds[0] < new_minx or geom.bounds[1] < new_miny or geom.bounds[2] > new_maxx or geom.bounds[3] > new_maxy:
-            continue
+
+
         if geom.geom_type != 'LineString':
             print(f"Skipping geometry of type {geom.geom_type}")
             continue
-            # weight = math.sqrt((geom.coords[i][0] - geom.coords[i + 1][0])**2 + (geom.coords[i][1] - geom.coords[i + 1][1])**2)
+
         risk = 0
         for geom_coords in geom.coords:
             if geom_coords in risk_coords:
                 risk = 1
-        speed_limit = row['SPEED_LIMI']
-        weight = weight * speed_limit
+        
+        edge_attributes = {
+            'weight': geom.length,
+            'risk': risk,
+        }
+
+        for property in PROPERTIES:
+            edge_attributes[property] = row[property]
+        
         G.add_edge(geom.coords[0], 
-                    geom.coords[-1], 
-                    weight=weight,
-                    risk=risk,
-                    pop=row['POP20'])
+                    geom.coords[-1],
+                    **edge_attributes)
         
 
     print("total nodes: ", len(G.nodes))
@@ -98,35 +107,52 @@ def get_next_node(G, left_node, current_string):
         print("error")
     return next_node
 
-def combine_edges(G, edge1, edge2):
+def accumulate_proerties(edge1, edge2):
+    properties = {}
+    for property in edge1:
+        # Check if the property is a number
+        if isinstance(edge1[property], (int, float)):
+            properties[property] = edge1[property] + edge2[property]
+        
+        # accumulate all of the object ids for late use
+        if property == 'OBJECTID':
+            properties[property] = []
+            if isinstance(edge1[property], list):
+                properties[property].extend(edge1[property])
+            else:
+                properties[property].append(edge1[property])
+            if isinstance(edge2[property], list):
+                properties[property].extend(edge2[property])
+            else:
+                properties[property].append(edge2[property])
+    return properties
+
+
+def combine_edges(edge1, edge2):
     # Check if the edges share a node
-    weight = get_edge_weight(G, edge1) + get_edge_weight(G, edge2)
-    risk = G[edge1[0]][edge1[1]]['risk'] or G[edge2[0]][edge2[1]]['risk']
-    pop = G[edge1[0]][edge1[1]]['pop'] + G[edge2[0]][edge2[1]]['pop']
+    new_properties = accumulate_proerties(edge1, edge2)
     if edge1[0] == edge2[0]:
-        return (edge1[1], edge2[1], weight, risk, pop)
+        return (edge1[1], edge2[1], new_properties)
     if edge1[0] == edge2[1]:
-        return (edge1[1], edge2[0], weight, risk, pop)
+        return (edge1[1], edge2[0], new_properties)
     if edge1[1] == edge2[0]:
-        return (edge1[0], edge2[1], weight, risk, pop)
+        return (edge1[0], edge2[1], new_properties)
     if edge1[1] == edge2[1]:
-        return (edge1[0], edge2[0], weight, risk, pop)
+        return (edge1[0], edge2[0], new_properties)
     return None
 
+
+# Simplifies the network by removing connector nodes and accumulating their properties
 def remove_connector_nodes(G):
     nodes_to_remove = set()
     edges_to_add = set()
     nodes_processed = set()
-    columns_to_accumulate = ['weight', 'risk', 'pop']
     
     for i, node in enumerate(G.nodes):
         # If the node has only two neighbors, it is a connector node and should be removed
         neighbors = list(G.neighbors(node))
         if len(neighbors) == 2 and node not in nodes_to_remove and node not in nodes_processed:
-            weight = G[node][neighbors[0]]['weight'] + G[node][neighbors[1]]['weight']
-            risk = G[node][neighbors[0]]['risk'] or G[node][neighbors[1]]['risk']
-            pop = G[node][neighbors[0]]['pop'] + G[node][neighbors[1]]['pop']
-            new_edge = (neighbors[0], neighbors[1], weight, risk, pop)
+            new_properties = accumulate_proerties(G[node][neighbors[0]], G[node][neighbors[1]])
 
             # Find two intersection nodes
             current_string = set([node])
@@ -135,12 +161,10 @@ def remove_connector_nodes(G):
             while G.degree[left_node] == 2:
                 # Find the neighbor that is not the current string
                 next_node = get_next_node(G, left_node, current_string)
-                # Update the weight
-                weight += G[left_node][next_node]['weight']
-                # Update the risk
-                risk = risk or G[left_node][next_node]['risk']
-                # Update the population
-                pop += G[left_node][next_node]['pop']
+                # Update Properties
+                for property in new_properties.keys():
+                    new_properties[property] += G[left_node][next_node][property]
+
                 current_string.add(left_node)
                 left_node = next_node
 
@@ -150,12 +174,10 @@ def remove_connector_nodes(G):
             while G.degree[right_node] == 2:
                 # Find the neighbor that is not the current string
                 next_node = get_next_node(G, right_node, current_string)
-                # Update the weight
-                weight += G[right_node][next_node]['weight']
-                # Update the risk
-                risk = risk or G[right_node][next_node]['risk']
-                # Update the population
-                pop += G[right_node][next_node]['pop']
+                # Update Properties
+                for property in new_properties.keys():
+                    new_properties[property] += G[right_node][next_node][property]
+
                 current_string.add(right_node)
                 right_node = next_node
 
@@ -163,12 +185,11 @@ def remove_connector_nodes(G):
             degrees = [G.degree(x) for x in current_string] 
             if 3 in degrees or 1 in degrees:
                 print("error")
-
-            new_edge = (left_node, right_node, weight, risk, pop)
+            
             nodes_to_remove.update(current_string)
             current_string.update([left_node, right_node])
             nodes_processed.update(current_string)
-            edges_to_add.add(new_edge)
+            edges_to_add.add((left_node, right_node, new_properties))
 
 
     print(f"Processed {len(nodes_processed)} nodes")
@@ -177,12 +198,12 @@ def remove_connector_nodes(G):
     for node in nodes_to_remove:
         G.remove_node(node)
 
-    for edge in edges_to_add: # TODO for some reason, the edges add back all the nodes meant to be removed
-        if edge[0] in nodes_to_remove or edge[1] in nodes_to_remove:
+    for (edge1, edge2, properties) in edges_to_add: # TODO for some reason, the edges add back all the nodes meant to be removed
+        if edge1 in nodes_to_remove or edge2 in nodes_to_remove:
             print("skipping edge")
             continue
 
-        G.add_edge(edge[0], edge[1], weight=edge[2], risk=edge[3], pop=edge[4])
+        G.add_edge(edge1, edge2, **properties)
 
     return G
 
