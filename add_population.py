@@ -3,13 +3,13 @@ from shapely.ops import nearest_points
 from shapely.strtree import STRtree
 import time
 
-def add_population_density():
+def add_population_density(path):
     # Set the maximum allowable distance (adjust based on your CRS and data)
     MAX_DISTANCE = 0.03
 
     # Load shapefiles
     polygons_gdf = gpd.read_file("Data/Ashville_Population/blocks.shp")
-    lines_gdf = gpd.read_file("Data\Ashville_Roads\Buncombe_Couny_Centerline_Data.shp")
+    lines_gdf = gpd.read_file(path)
 
     # Ensure both GeoDataFrames have the same CRS
     if polygons_gdf.crs != lines_gdf.crs:
@@ -75,6 +75,8 @@ def add_population_density():
 
     # Save the GeoDataFrame to a file
     grouped_gdf.to_file("Data/temp/population_mapping.shp")
+
+    print(list(grouped_gdf.columns))
 
     return grouped_gdf
 

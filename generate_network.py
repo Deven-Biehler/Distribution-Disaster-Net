@@ -4,6 +4,7 @@ import geopandas as gpd
 import pandas as pd
 import math
 import numpy as np
+import random
 
 
 
@@ -26,6 +27,19 @@ def get_risk_coords(risk):
             risk_coords.add(coords)
     return risk_coords
 
+def add_risk(G, risk):
+    risk_coords = get_risk_coords(risk)
+    # round the coordinates to 5 decimal places
+    # risk_coords = set([(round(x, 5), round(y, 5)) for (x, y) in risk_coords])
+    edges = list(G.edges)
+    # edges = [(round(x, 5), round(y, 5)) for edge in edges for x, y in edge]
+    for edge in edges:
+        if edge[0] in risk_coords or edge[1] in risk_coords:
+            G[edge[0]][edge[1]]['risk'] = random.random() / 3
+        else:
+            G[edge[0]][edge[1]]['risk'] = 0
+    return G
+
 def create_graph(gdf, risk):
     # Create a bounding box for the entire dataset
     # minx, miny, maxx, maxy = gdf.total_bounds
@@ -40,24 +54,10 @@ def create_graph(gdf, risk):
     # new_maxx = maxx - marginx
     # new_maxy = maxy - marginy
 
-    PROPERTIES = ['OBJECTID', 'CENTERLINE', 'ROAD_CLASS', 'STREET_PRE', 'STREET_NAM', 
-                  'STREET_TYP', 'STREET_POS', 'STREET_DUP', 'FULL_STREE', 'SPEED_LIMI', 
-                  'LANE_COUNT', 'LEFT_FROM_', 'LEFT_TO_AD', 'RIGHT_FROM', 'RIGHT_TO_A', 
-                  'USER_ID', 'CREATE_DAT', 'CHANGE_DAT', 'LESN', 'RESN', 'LZIP', 'RZIP', 
-                  'LCOMMCODE', 'RCOMMCODE', 'ROUTE_ID', 'OneWay', 'FromElevat', 'ToElevatio', 
-                  'GlobalID', 'last_edite', 'IntervalDi', 'created_us', 'created_da', 
-                  'last_edi_1', 'Shape__Len', 'geometry']
-    
-    PROPERTIES.remove('STREET_PRE')
-    PROPERTIES.remove('created_us')
-    PROPERTIES.remove('created_da')
-    PROPERTIES.remove('last_edi_1')
-    PROPERTIES.remove('STREET_POS')
-    PROPERTIES.remove('CREATE_DAT')
-    PROPERTIES.remove('CHANGE_DAT')
+    PROPERTIES = list(gdf.columns)
+
 
     G = nx.Graph()
-    risk_coords = get_risk_coords(risk)
     
     for i, row in gdf.iterrows():
         error = False
@@ -80,15 +80,9 @@ def create_graph(gdf, risk):
         if geom.geom_type != 'LineString':
             # print(f"Skipping geometry of type {geom.geom_type}")
             continue
-
-        risk = 0
-        for geom_coords in geom.coords:
-            if geom_coords in risk_coords:
-                risk = 1
         
         edge_attributes = {
-            'weight': geom.length,
-            'risk': risk,
+            'weight': geom.length
         }
 
         for property in PROPERTIES:
@@ -99,6 +93,8 @@ def create_graph(gdf, risk):
         G.add_edge(geom.coords[0], 
                     geom.coords[-1],
                     **edge_attributes)
+        
+    G = add_risk(G, risk)
         
 
     print("total nodes: ", len(G.nodes))
@@ -123,18 +119,21 @@ def get_next_node(G, left_node, current_string):
 def accumulate_proerties(properties1, properties2):
     properties = {}
     for key in properties1.keys():
+        # check for the risk property
+        if key == 'risk':
+            properties[key] = max(properties1[key], properties2[key])
+            continue
         # Check if the property is a number
         if isinstance(properties1[key], (int, float)) and isinstance(properties2[key], (int, float)):
             properties[key] = properties1[key] + properties2[key]
         
         # accumulate all of the object ids for late use
-        if property == 'OBJECTID':
-            properties[property] = []
+        if property == 'geometry':
+            properties[key] = []
             if isinstance(properties1[key], list):
                 properties[key].extend(properties1[key])
             else:
                 properties[key].append(properties1[key])
-
             if isinstance(properties2[key], list):
                 properties[key].extend(properties2[key])
             else:
@@ -221,3 +220,26 @@ def remove_connector_nodes(G):
 
     return G
 
+
+if __name__ == "__main__":
+    # Read the data
+    gdf = gpd.read_file("Data\Ashville_Roads\Bun_DBO_CENTERLINE.shp")
+    risk = gpd.read_file("Data\Ashville_Floods\Risk_zone.shp")
+
+    # make sure the points are in the same crs as the graph
+    risk = risk.to_crs(gdf.crs)
+
+    # Create the graph
+    G = create_graph(gdf, risk)
+
+    # Remove connector nodes
+    G = remove_connector_nodes(G)
+
+    # Save the graph
+    nx.write_gml(G, "Graph_data\Buncombe_Couny_Centerline_Data.gml")
+    # Check to make sure risk is added with the correct values
+    for edge in G.edges:
+        if G[edge[0]][edge[1]]['risk'] > 0:
+            G[edge[0]][edge[1]]['risk'] *= 100  # Example: scale values up for better visibility
+
+    print("Done")

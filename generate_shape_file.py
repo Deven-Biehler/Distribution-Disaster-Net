@@ -39,7 +39,8 @@ def generate_shape_file_from_json(json_file, output_file):
     with open(json_file) as f:
         data = json.load(f)
     # Create a new shapefile
-    w = shapefile.Writer(output_file, shapeType=shapefile.POLYLINE)
+    crs = {'init': 'epsg:4326'}
+    w = shapefile.Writer(output_file, shapeType=shapefile.POLYLINE, crs=crs)
     w.field('ID', 'N')
     # for field in data[0].graph:
     #     w.field(field, 'C')
